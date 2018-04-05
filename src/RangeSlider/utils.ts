@@ -1,6 +1,8 @@
-export function killEvent(event: Event) {
+export function killEvent(event: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>) {
   event.stopPropagation();
-  event.preventDefault();
+  if (event.type !== 'touchmove') {
+    event.preventDefault();
+  }
 }
 
 // export function getHandleFor(event: Event) {
@@ -21,4 +23,12 @@ export function getValue(pos: number, min: number, max: number) {
   }
 
   return Math.round((max - min) * decimal + min);
+}
+
+export function addEventListeners(eventMap: [string, EventListenerOrEventListenerObject][]) {
+  eventMap.forEach(node => document.addEventListener(node[0], node[1], false));
+}
+
+export function removeEventListeners(eventMap: [string, EventListenerOrEventListenerObject][]) {
+  eventMap.forEach(node => document.removeEventListener(node[0], node[1], false));
 }

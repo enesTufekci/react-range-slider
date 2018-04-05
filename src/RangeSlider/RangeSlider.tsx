@@ -4,7 +4,7 @@ import * as ReactDOM from 'react-dom';
 
 import styled from 'styled-components';
 
-import { killEvent, getValue, getPosition } from './utils';
+import { killEvent, getValue, getPosition, addEventListeners, removeEventListeners } from './utils';
 
 import Handle from './components/Handle';
 import Background from './components/Background';
@@ -14,6 +14,9 @@ const SliderConstants = {
   PERCENT_FULL: 100,
   PERCENT_EMPTY: 0,
 };
+
+interface ReactMouseEvent extends React.MouseEvent<HTMLButtonElement> {}
+interface ReactTouchEvent extends React.TouchEvent<HTMLButtonElement> {}
 
 interface RangeSliderProps {
   // handle?: React.SFC;
@@ -30,7 +33,7 @@ interface RangeSliderProps {
 }
 
 interface RangeSliderState {
-  handleDimensions: number;
+  handleClientWidth: number;
   // mousePos: { x, y },
   sliderBox: { left: number; width: number };
   slidingIndex: number;
@@ -55,7 +58,7 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     const { min, max, values } = this.props;
     this.state = {
       handlePos: values ? values.map(value => getPosition(value, min || 0, max || 100)) : [],
-      handleDimensions: 0,
+      handleClientWidth: 0,
       // mousePos: null,
       sliderBox: { left: 0, width: 0 },
       slidingIndex: -1,
@@ -70,68 +73,22 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     return { max, min, values };
   }
 
-  handleTouchSlide(event: TouchEvent) {
-    const { slidingIndex } = this.state;
-    if (slidingIndex === null) {
-      return;
-    }
-
-    if (event.changedTouches.length > 1) {
-      this.endSlide();
-      return;
-    }
-
-    const touch = event.changedTouches[0];
-
-    this.handleSlide(touch.clientX);
-    killEvent(event);
-  }
-
-  handleSlide = (x: number): void => {
-    // const { onSliderDragMove } = this.props;
-    const { slidingIndex, sliderBox } = this.state;
-    const slidingKnobThreshold: number = slidingIndex === 0 ? -12 : 12;
-    const positionPercent: number =
-      (x - sliderBox.left + slidingKnobThreshold) / sliderBox.width * SliderConstants.PERCENT_FULL;
-
-    this.slideTo(slidingIndex, positionPercent);
-  };
-
-  endSlide = () => {
-    // const { onSliderDragEnd } = this.props;
-
-    this.setState({ slidingIndex: -1 });
-
-    if (typeof document.removeEventListener === 'function') {
-      document.removeEventListener('mouseup', this.endSlide, false);
-      document.removeEventListener('touchend', this.endSlide, false);
-      document.removeEventListener('touchmove', this.handleTouchSlide, false);
-      document.removeEventListener('mousemove', this.handleMouseSlide, false);
-    }
-
-    // if (onSliderDragEnd) {
-    //   onSliderDragEnd();
-    // }
-  };
-
-  getSliderBoundingBox = () => {
+  getSliderBoundingBox = (): {left: number, width: number} => {
     const node = ReactDOM.findDOMNode(this.refs.sliderContainer);
     const rect = node.getBoundingClientRect();
     return {
-      height: rect.height || node.clientHeight,
       left: rect.left,
-      top: rect.top,
       width: rect.width || node.clientWidth,
     };
   };
 
-  getProgressStyle(idx: number) {
+  getProgressStyle = (idx: number): {left: string | number, width: string } => {
     const { handlePos } = this.state;
 
     const value = handlePos[idx];
 
     if (idx === 0) {
-      return orientation === 'vertical' ? { height: `${value}%`, top: 0 } : { left: 0, width: `${value}%` };
+      return { left: 0, width: `${value}%` };
     }
 
     const prevValue = handlePos[idx - 1];
@@ -148,34 +105,24 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     return minVal;
   }
 
-  getMaxValue(idx: number) {
+  getMaxValue = (idx: number) => {
     const { max } = this.props;
     const { values } = this.state;
     // return values[idx + 1] ? Math.min(max, values[idx + 1]) : max;
     return values[idx + 1] ? Math.min(max || 100, values[idx + 1]) : max;
   }
 
-  getHandleDimensions = (event: React.MouseEvent<HTMLButtonElement>, sliderBox: { [key: string]: number }) => {
+  getHandleClientWidth = (event: ReactMouseEvent | ReactTouchEvent): number => {
     const handleNode = event.currentTarget || null;
 
     if (!handleNode) {
       return 0;
     }
 
-    return handleNode.clientWidth / sliderBox.width * SliderConstants.PERCENT_FULL / 2;
+    return handleNode.clientWidth;
   };
 
-  setStartSlide = (event: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>, x: number) => {
-    const sliderBox = this.getSliderBoundingBox();
-    this.setState({
-      handleDimensions: this.getHandleDimensions(event, sliderBox),
-      // mousePos: { x, y },
-      sliderBox,
-      slidingIndex: Number(event.currentTarget.dataset.handleKey),
-    });
-  };
-
-  userAdjustPosition(idx: number, proposedPosition: number) {
+  userAdjustPosition(idx: number, proposedPosition: number): number {
     const { getNextHandlePosition } = this.props;
     let nextPosition = proposedPosition;
     if (getNextHandlePosition) {
@@ -195,7 +142,7 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     return nextPosition;
   }
 
-  validatePosition(idx: number, proposedPosition: number) {
+  validatePosition(idx: number, proposedPosition: number): number {
     const { handlePos } = this.state;
 
     const nextPosition = this.userAdjustPosition(idx, proposedPosition);
@@ -205,7 +152,7 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     );
   }
 
-  getNextState(idx: number, proposedPosition: number) {
+  getNextState(idx: number, proposedPosition: number): {handlePos: number[], values: number[]} {
     const { handlePos } = this.state;
     const { max, min } = this.props;
 
@@ -219,7 +166,7 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     };
   }
 
-  slideTo = (idx: number, proposedPosition: number) => {
+  slideTo = (idx: number, proposedPosition: number): void => {
     const nextState = this.getNextState(idx, proposedPosition);
 
     this.setState(nextState, () => {
@@ -230,41 +177,86 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     });
   };
 
-  handleMouseSlide = (event: MouseEvent) => {
+  handleSlide = (x: number): void => {
+    // const { onSliderDragMove } = this.props;
+    const { slidingIndex, sliderBox } = this.state;
+    const slidingKnobThreshold: number = slidingIndex === 0 ? -12 : 12;
+    const positionPercent: number =
+      (x - sliderBox.left + slidingKnobThreshold) / sliderBox.width * SliderConstants.PERCENT_FULL;
+
+    this.slideTo(slidingIndex, positionPercent);
+  };
+
+  endSlide = () => {
+    this.setState({ slidingIndex: -1 });
+    removeEventListeners([
+      ['mouseup', this.endSlide],
+      ['touchend', this.endSlide],
+      ['touchmove', this.handleTouchSlide],
+      ['mousemove', this.handleMouseSlide],
+    ]);
+  };
+
+  handleMouseSlide = (event: MouseEvent): void => {
     const { slidingIndex } = this.state;
     if (slidingIndex === -1) {
       return;
     }
     this.handleSlide(event.clientX);
-    killEvent(event);
-  };
-
-  startMouseSlide = (event: React.MouseEvent<HTMLButtonElement>) => {
-    this.setStartSlide(event, event.clientX);
-
-    if (typeof document.addEventListener === 'function') {
-      document.addEventListener('mousemove', this.handleMouseSlide, false);
-      document.addEventListener('mouseup', this.endSlide, false);
-    }
-
     // killEvent(event);
   };
 
-  startTouchSlide(event: React.TouchEvent<HTMLButtonElement>) {
-    // const { onSliderDragStart } = this.props;
-
-    // if (event.changedTouches.length > 1) return;
+  handleTouchSlide = (event: TouchEvent): void => {
+    const { slidingIndex } = this.state;
+    if (slidingIndex === -1) {
+      return;
+    }
+    // stop sliding on multitouch
+    if (event.changedTouches.length > 1) {
+      this.endSlide();
+      return;
+    }
 
     const touch = event.changedTouches[0];
 
-    this.setStartSlide(event, touch.clientX);
-
-    document.addEventListener('touchmove', this.handleTouchSlide, false);
-    document.addEventListener('touchend', this.endSlide, false);
-
-    // if (onSliderDragStart) onSliderDragStart();
-
+    this.handleSlide(touch.clientX);
     // killEvent(event);
+  }
+
+  setStartSlide = (slidingIndex: number, handleClientWidth: number, x?: number): void => {
+    const sliderBox = this.getSliderBoundingBox();
+    this.setState({
+      handleClientWidth,
+      sliderBox,
+      slidingIndex,
+    });
+  };
+
+  startMouseSlide = (slidingIndex: number) => (event: ReactMouseEvent) => {
+    this.setStartSlide(slidingIndex, this.getHandleClientWidth(event));
+    if (typeof document.addEventListener === 'function') {
+      addEventListeners([
+        ['mousemove', this.handleMouseSlide],
+        ['mouseup', this.endSlide]
+      ]);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  startTouchSlide = (slidingIndex: number) => (event: ReactTouchEvent) => {
+    if (event.changedTouches.length > 1) {
+      return;
+    }
+
+    this.setStartSlide(slidingIndex, this.getHandleClientWidth(event));
+    addEventListeners([
+      ['touchmove', this.handleTouchSlide],
+      ['touchend', this.endSlide]
+    ]);
+
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   render() {
@@ -282,12 +274,10 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
                 aria-valuenow={values[index]}
                 // aria-disabled={disabled}
                 data-handle-key={index}
-                // onClick={() => killEvent() }
+                onClick={killEvent}
                 // onKeyDown={!disabled ? this.handleKeydown : undefined}
-                onMouseDown={event => {
-                  return this.startMouseSlide(event);
-                }}
-                // onTouchStart={!disabled ? this.startTouchSlide : undefined}
+                onMouseDown={this.startMouseSlide(index)}
+                onTouchStart={this.startTouchSlide(index)}
                 role="slider"
                 key={`handle-${index}`}
                 left={`calc(${pos}% - ${index * 24}px)`}
