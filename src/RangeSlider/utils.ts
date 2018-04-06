@@ -1,4 +1,11 @@
-export function killEvent(event: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>) {
+export function killEvent(event: MouseEvent | TouchEvent) {
+  event.stopPropagation();
+  if (event.type !== 'touchmove') {
+    event.preventDefault();
+  }
+}
+
+export function killReactEvent(event: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>) {
   event.stopPropagation();
   if (event.type !== 'touchmove') {
     event.preventDefault();

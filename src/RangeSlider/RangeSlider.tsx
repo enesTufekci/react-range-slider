@@ -1,10 +1,9 @@
 // tslint:disable:no-console
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-
 import styled from 'styled-components';
 
-import { killEvent, getValue, getPosition, addEventListeners, removeEventListeners } from './utils';
+import { killEvent, killReactEvent, getPosition, addEventListeners, removeEventListeners } from './utils';
 
 import Handle from './components/Handle';
 import Background from './components/Background';
@@ -25,55 +24,73 @@ interface RangeSliderProps {
   values?: number[];
   min?: number;
   max?: number;
-  getNextHandlePosition?: Function;
+  getNextHandlePositionition?: Function;
   onSliderDragEnd?: Function;
   onValuesUpdated?: Function;
   onAfterSet?: Function;
-  disabled?: Boolean;
+  disabled?: boolean;
+}
+
+interface RangeSliderPublicState {
+  min?: number;
+  max?: number;
+  values?: number[];
 }
 
 interface RangeSliderState {
   handleClientWidth: number;
-  // mousePos: { x, y },
   sliderBox: { left: number; width: number };
   slidingIndex: number;
-  handlePos: number[];
+  handlePosition: number[];
   values: number[];
+  disabled: boolean;
+  maxPossibleValue: number;
+  minPossibleValue: number;
 }
 
 const RangeSliderContainer = styled.div`
   width: 100%;
   position: relative;
+  height: 24px;
 `;
 
 class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
   public static defaultProps: RangeSliderProps = {
-    values: [0, 100],
+    values: [0, 50],
     min: 0,
     max: 100,
+    disabled: false,
   };
 
   constructor(props: RangeSliderProps) {
     super(props);
-    const { min, max, values } = this.props;
+
+    const { min, max, values, disabled } = this.props;
+    const maxPossibleValue = max || 100;
+    const minPossibleValue = min || 0;
     this.state = {
-      handlePos: values ? values.map(value => getPosition(value, min || 0, max || 100)) : [],
+      handlePosition: values ? values.map(value => getPosition(value, minPossibleValue, maxPossibleValue)) : [],
       handleClientWidth: 0,
-      // mousePos: null,
       sliderBox: { left: 0, width: 0 },
       slidingIndex: -1,
       values: values || [0, 100],
+      disabled: !!disabled,
+      maxPossibleValue,
+      minPossibleValue,
     };
   }
 
-  getPublicState() {
-    const { min, max } = this.props;
-    const { values } = this.state;
-
-    return { max, min, values };
+  componentDidUpdate() {
+    console.log(this.props.values);
   }
 
-  getSliderBoundingBox = (): {left: number, width: number} => {
+  getPublicState = (): RangeSliderPublicState => {
+    const { min, max } = this.props;
+    const { values } = this.state;
+    return { max, min, values };
+  };
+
+  getSliderBoundingBox = (): { left: number; width: number } => {
     const node = ReactDOM.findDOMNode(this.refs.sliderContainer);
     const rect = node.getBoundingClientRect();
     return {
@@ -82,59 +99,38 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     };
   };
 
-  getProgressStyle = (idx: number): {left: string | number, width: string } => {
-    const { handlePos } = this.state;
-
-    const value = handlePos[idx];
-
-    if (idx === 0) {
-      return { left: 0, width: `${value}%` };
-    }
-
-    const prevValue = handlePos[idx - 1];
-    const diffValue = value - prevValue;
-
-    return { left: `${prevValue}%`, width: `${diffValue}%` };
-  }
-
-  getMinValue(idx: number) {
+  getMinValue(slidingHandleIndex: number) {
     const { min } = this.props;
     const { values } = this.state;
-    // return values[idx - 1] ? Math.max(min, values[idx - 1]) : min;
-    const minVal = values[idx - 1] ? Math.max(min || 0, values[idx - 1]) : min;
-    return minVal;
+    return values[slidingHandleIndex - 1] ? Math.max(min || 0, values[slidingHandleIndex - 1]) : min;
   }
 
-  getMaxValue = (idx: number) => {
+  getMaxValue = (slidingHandleIndex: number) => {
     const { max } = this.props;
     const { values } = this.state;
-    // return values[idx + 1] ? Math.min(max, values[idx + 1]) : max;
-    return values[idx + 1] ? Math.min(max || 100, values[idx + 1]) : max;
-  }
+    return values[slidingHandleIndex + 1] ? Math.min(max || 100, values[slidingHandleIndex + 1]) : max;
+  };
 
   getHandleClientWidth = (event: ReactMouseEvent | ReactTouchEvent): number => {
     const handleNode = event.currentTarget || null;
-
     if (!handleNode) {
       return 0;
     }
-
     return handleNode.clientWidth;
   };
 
-  userAdjustPosition(idx: number, proposedPosition: number): number {
-    const { getNextHandlePosition } = this.props;
+  userAdjustPosition(slidingHandleIndex: number, proposedPosition: number): number {
+    const { getNextHandlePositionition } = this.props;
     let nextPosition = proposedPosition;
-    if (getNextHandlePosition) {
-      nextPosition = parseFloat(getNextHandlePosition(idx, proposedPosition));
-
+    if (getNextHandlePositionition) {
+      nextPosition = parseFloat(getNextHandlePositionition(slidingHandleIndex, proposedPosition));
       if (
         Number.isNaN(nextPosition) ||
         nextPosition < SliderConstants.PERCENT_EMPTY ||
         nextPosition > SliderConstants.PERCENT_FULL
       ) {
         throw new TypeError(
-          'getNextHandlePosition returned invalid position. Valid positions are floats between 0 and 100',
+          'getNextHandlePositionition returned invalid position. Valid positions are floats between 0 and 100',
         );
       }
     }
@@ -142,47 +138,62 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     return nextPosition;
   }
 
-  validatePosition(idx: number, proposedPosition: number): number {
-    const { handlePos } = this.state;
+  validatePosition(slidingHandleIndex: number, proposedPosition: number): number {
+    const { handlePosition } = this.state;
 
-    const nextPosition = this.userAdjustPosition(idx, proposedPosition);
+    const nextPosition = this.userAdjustPosition(slidingHandleIndex, proposedPosition);
     return Math.max(
-      Math.min(nextPosition, handlePos[idx + 1] !== undefined ? handlePos[idx + 1] - 12 : SliderConstants.PERCENT_FULL),
-      handlePos[idx - 1] !== undefined ? handlePos[idx - 1] + 12 : SliderConstants.PERCENT_EMPTY,
+      Math.min(
+        nextPosition,
+        handlePosition[slidingHandleIndex + 1] !== undefined
+          ? handlePosition[slidingHandleIndex + 1] - this.state.handleClientWidth / 2
+          : SliderConstants.PERCENT_FULL,
+      ),
+      handlePosition[slidingHandleIndex - 1] !== undefined
+        ? handlePosition[slidingHandleIndex - 1] + this.state.handleClientWidth / 2
+        : SliderConstants.PERCENT_EMPTY,
     );
   }
 
-  getNextState(idx: number, proposedPosition: number): {handlePos: number[], values: number[]} {
-    const { handlePos } = this.state;
-    const { max, min } = this.props;
-
-    const actualPosition = this.validatePosition(idx, proposedPosition);
-
-    const nextHandlePos = handlePos.map((pos, index) => (index === idx ? actualPosition : pos));
+  getNextState(slidingHandleIndex: number, proposedPosition: number): { handlePosition: number[]; values: number[] } {
+    const { handlePosition } = this.state;
+    const actualPosition = this.validatePosition(slidingHandleIndex, proposedPosition);
+    const nextHandlePosition = handlePosition.map(
+      (pos, index) => (index === slidingHandleIndex ? actualPosition : pos),
+    );
 
     return {
-      handlePos: nextHandlePos,
-      values: nextHandlePos.map((pos: number) => getValue(pos, min || 0, max || SliderConstants.PERCENT_FULL)),
+      handlePosition: nextHandlePosition,
+      values: this.calculateValues(nextHandlePosition),
     };
   }
 
-  slideTo = (idx: number, proposedPosition: number): void => {
-    const nextState = this.getNextState(idx, proposedPosition);
+  calculateValues = (handlePosition: number[]) => {
+    const { maxPossibleValue, minPossibleValue } = this.state;
+    return [
+      Math.max(minPossibleValue, Math.floor(handlePosition[0] * maxPossibleValue / 100)),
+      Math.min(maxPossibleValue, Math.ceil(handlePosition[1] * maxPossibleValue / 100)),
+    ];
+  }
 
-    this.setState(nextState, () => {
-      const { onValuesUpdated } = this.props;
-      if (onValuesUpdated) {
-        onValuesUpdated(this.getPublicState());
-      }
-    });
+  slideTo = (slidingHandleIndex: number, proposedPosition: number): void => {
+    const nextState = this.getNextState(slidingHandleIndex, proposedPosition);
+    this.setState(nextState, this.handleOnValuesUpdated);
   };
 
-  handleSlide = (x: number): void => {
-    // const { onSliderDragMove } = this.props;
+  handleOnValuesUpdated = () => {
+    const { onValuesUpdated } = this.props;
+    if (onValuesUpdated) {
+      const { values } = this.state;
+      onValuesUpdated(values);
+    }
+  }
+
+  handleSlide = (clientX: number): void => {
     const { slidingIndex, sliderBox } = this.state;
-    const slidingKnobThreshold: number = slidingIndex === 0 ? -12 : 12;
+    const slidingThreshold = this.state.handleClientWidth / 2 * (slidingIndex === 0 ? -1 : 1);
     const positionPercent: number =
-      (x - sliderBox.left + slidingKnobThreshold) / sliderBox.width * SliderConstants.PERCENT_FULL;
+      (clientX - sliderBox.left + slidingThreshold) / sliderBox.width * SliderConstants.PERCENT_FULL;
 
     this.slideTo(slidingIndex, positionPercent);
   };
@@ -203,7 +214,7 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
       return;
     }
     this.handleSlide(event.clientX);
-    // killEvent(event);
+    killEvent(event);
   };
 
   handleTouchSlide = (event: TouchEvent): void => {
@@ -220,8 +231,8 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
     const touch = event.changedTouches[0];
 
     this.handleSlide(touch.clientX);
-    // killEvent(event);
-  }
+    killEvent(event);
+  };
 
   setStartSlide = (slidingIndex: number, handleClientWidth: number, x?: number): void => {
     const sliderBox = this.getSliderBoundingBox();
@@ -235,47 +246,54 @@ class RangeSlider extends React.Component<RangeSliderProps, RangeSliderState> {
   startMouseSlide = (slidingIndex: number) => (event: ReactMouseEvent) => {
     this.setStartSlide(slidingIndex, this.getHandleClientWidth(event));
     if (typeof document.addEventListener === 'function') {
-      addEventListeners([
-        ['mousemove', this.handleMouseSlide],
-        ['mouseup', this.endSlide]
-      ]);
+      addEventListeners([['mousemove', this.handleMouseSlide], ['mouseup', this.endSlide]]);
     }
-    event.preventDefault();
-    event.stopPropagation();
+    killReactEvent(event);
   };
 
   startTouchSlide = (slidingIndex: number) => (event: ReactTouchEvent) => {
     if (event.changedTouches.length > 1) {
       return;
     }
-
     this.setStartSlide(slidingIndex, this.getHandleClientWidth(event));
-    addEventListeners([
-      ['touchmove', this.handleTouchSlide],
-      ['touchend', this.endSlide]
-    ]);
+    addEventListeners([['touchmove', this.handleTouchSlide], ['touchend', this.endSlide]]);
+    killReactEvent(event);
+  };
 
-    event.preventDefault();
-    event.stopPropagation();
+  getClosestHandle(positionPercent: number): number {
+    const { handlePosition } = this.state;
+
+    return handlePosition.reduce((closestHandleIndex, node, HandleIndex) => {
+      const challenger = Math.abs(handlePosition[HandleIndex] - positionPercent);
+      const current = Math.abs(handlePosition[closestHandleIndex] - positionPercent);
+      return challenger < current ? HandleIndex : closestHandleIndex;
+    }, 0); // tslint:disable-line
   }
 
+  handleSliderClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const sliderBox = this.getSliderBoundingBox();
+    const positionDecimal = (event.clientX - sliderBox.left) / sliderBox.width;
+    const positionPercent = positionDecimal * SliderConstants.PERCENT_FULL;
+    const handleId = this.getClosestHandle(positionPercent);
+    this.slideTo(handleId, positionPercent);
+  };
+
   render() {
-    const { handlePos, values /* disabled */ } = this.state;
+    const { handlePosition, values, disabled } = this.state;
     return (
-      // tslint:disable-next-line:jsx-no-string-ref
-      <RangeSliderContainer ref="sliderContainer">
+      // tslint:disable:jsx-no-string-ref
+      <RangeSliderContainer ref="sliderContainer" onClick={this.handleSliderClick}>
         <Background />
-        <ProgressBar style={{ width: `${handlePos[1] - handlePos[0]}%`, left: `${handlePos[0]}%` }} />
+        <ProgressBar style={{ width: `${handlePosition[1] - handlePosition[0]}%`, left: `${handlePosition[0]}%` }} />
         {values
-          ? handlePos.map((pos, index) => (
+          ? handlePosition.map((pos, index) => (
               <Handle
                 aria-valuemax={this.getMaxValue(index)}
                 aria-valuemin={this.getMinValue(index)}
                 aria-valuenow={values[index]}
-                // aria-disabled={disabled}
+                aria-disabled={disabled}
                 data-handle-key={index}
-                onClick={killEvent}
-                // onKeyDown={!disabled ? this.handleKeydown : undefined}
+                onClick={killReactEvent}
                 onMouseDown={this.startMouseSlide(index)}
                 onTouchStart={this.startTouchSlide(index)}
                 role="slider"
